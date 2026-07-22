@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>استعلام قیمت خودرو</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f7f9fc, #eef3f8);
+            font-family: Tahoma, Arial, sans-serif;
+        }
+        .card-main {
+            border: 0;
+            border-radius: 18px;
+            box-shadow: 0 12px 35px rgba(0,0,0,0.08);
+        }
+        .badge-source {
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+        .source-iranjib { background: #e8f1ff; color: #1457c2; }
+        .source-hamrah { background: #fff1df; color: #c15a00; }
+        .table thead th {
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-12 col-lg-11 col-xl-10">
+            <div class="card card-main p-4 p-md-5 bg-white">
+                <div class="text-center mb-4">
+                    <h1 class="h3 fw-bold text-primary">استعلام لحظه‌ای قیمت خودرو</h1>
+                    <p class="text-muted mb-0">جستجو از همراه مکانیک و ایران‌جیب</p>
+                </div>
+
+                <div class="input-group input-group-lg mb-4">
+                    <input id="searchInput" type="text" class="form-control" placeholder="مثلاً: ID4 ، T-Roc ، Sylphy ، Tank ، MG5">
+                    <button id="searchBtn" class="btn btn-primary">جستجو</button>
+                </div>
+
+                <div id="loading" class="text-center d-none my-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <div class="mt-2 text-muted">در حال دریافت اطلاعات...</div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>نام خودرو</th>
+                                <th class="text-center">قیمت بازار</th>
+                                <th class="text-center">قیمت کارخانه/نمایندگی</th>
+                                <th class="text-center">منبع</th>
+                                <th class="text-center">تاریخ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody">
+                            <tr>
+                                <td colspan="5" class="text-center text-muted py-4">
+                                    نام خودرو را وارد کن و جستجو بزن.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const input = document.getElementById("searchInput");
+const btn = document.getElementById("searchBtn");
+const loading = document.getElementById("loading");
+const body = document.getElementById("resultsBody");
+
+function badgeClass(source) {
+    return source.includes("ایران‌جیب") ? "source-iranjib" : "source-hamrah";
+}
+
+async function search() {
+    const q = input.value.trim();
+    loading.classList.remove("d-none");
+    body.innerHTML = "";
+
+    try {
+        const res = await fetch(`/api/prices?query=${encodeURIComponent(q)}`);
+        const data = await res.json();
+
+        loading.classList.add("d-none");
+
+        if (!data.length) {
+            body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">موردی یافت نشد.</td></tr>`;
+            return;
+        }
+
+        body.innerHTML = data.map(item => `
+            <tr>
+                <td class="fw-semibold">${item.car_name}</td>
+                <td class="text-center">${item.market_price}</td>
+                <td class="text-center">${item.factory_price || "---"}</td>
+                <td class="text-center">
+                    <span class="badge-source ${badgeClass(item.source)}">${item.source}</span>
+                </td>
+                <td class="text-center text-muted">${item.date || "---"}</td>
+            </tr>
+        `).join("");
+    } catch (e) {
+        loading.classList.add("d-none");
+        body.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-4">خطا در ارتباط با سرور</td></tr>`;
+    }
+}
+
+btn.addEventListener("click", search);
+input.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") search();
+});
+</script>
+</body>
+</html>
