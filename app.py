@@ -1,5 +1,6 @@
 import re
 import threading
+import os
 from flask import Flask, render_template, jsonify, request
 import requests
 from bs4 import BeautifulSoup
@@ -11,115 +12,47 @@ HEADERS = {
 }
 
 def clean_text(text):
-    if not text:
-        return ""
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    if not text: return ""
+    return re.sub(r"\s+", " ", text).strip()
 
 def scrape_iranjib_internal(results):
     try:
         url = "https://www.iranjib.ir/showgroup/45/"
         r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code != 200:
-            return
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        page_text = clean_text(soup.get_text(" "))
-
-        # تاریخ
-        date_text = "نامشخص"
-        m_date = re.search(r"آخرین به روز رسانی[^0-9۰-۹]*([0-9۰-۹/\-]+)", page_text)
-        if m_date:
-            date_text = m_date.group(1)
-
-        # تلاش برای پیدا کردن ردیف‌های خودرو
-        tables = soup.find_all("table")
-        for table in tables:
-            rows = table.find_all("tr")
-            for row in rows:
-                cols = [clean_text(td.get_text(" ")) for td in row.find_all("td")]
-                if len(cols) >= 3:
-                    name = cols[0]
-                    market = cols[1]
-                    factory = cols[2]
-
-                    if name and len(name) > 2 and any(ch.isdigit() for ch in market):
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, "html.parser")
+            tables = soup.find_all("table")
+            for table in tables:
+                for row in table.find_all("tr")[1:]:
+                    cols = [clean_text(td.get_text()) for td in row.find_all("td")]
+                    if len(cols) >= 3:
                         results.append({
-                            "car_name": name,
-                            "market_price": market,
-                            "factory_price": factory if factory else "---",
+                            "car_name": cols[0],
+                            "market_price": cols[1],
+                            "factory_price": cols[2] if cols[2] else "---",
                             "source": "ایران‌جیب (داخلی)",
-                            "date": date_text
+                            "date": "بروزرسانی شده"
                         })
-    except Exception as e:
-        print("iranjib internal error:", e)
-
-def scrape_iranjib_imported(results):
-    try:
-        url = "https://www.iranjib.ir/showgroup/46/"
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code != 200:
-            return
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        page_text = clean_text(soup.get_text(" "))
-
-        date_text = "نامشخص"
-        m_date = re.search(r"آخرین به روز رسانی[^0-9۰-۹]*([0-9۰-۹/\-]+)", page_text)
-        if m_date:
-            date_text = m_date.group(1)
-
-        tables = soup.find_all("table")
-        for table in tables:
-            rows = table.find_all("tr")
-            for row in rows:
-                cols = [clean_text(td.get_text(" ")) for td in row.find_all("td")]
-                if len(cols) >= 3:
-                    name = cols[0]
-                    market = cols[1]
-                    factory = cols[2]
-
-                    if name and len(name) > 2 and any(ch.isdigit() for ch in market):
-                        results.append({
-                            "car_name": name,
-                            "market_price": market,
-                            "factory_price": factory if factory else "---",
-                            "source": "ایران‌جیب (وارداتی)",
-                            "date": date_text
-                        })
-    except Exception as e:
-        print("iranjib imported error:", e)
+    except Exception as e: print("Iranjib Error:", e)
 
 def scrape_hamrah(results):
     try:
         url = "https://www.hamrah-mechanic.com/carprice/"
         r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code != 200:
-            return
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        page_text = clean_text(soup.get_text(" "))
-
-        date_text = "نامشخص"
-        m_date = re.search(r"به روز رسانی\s*[:：]?\s*([0-9۰-۹/\-]+)", page_text)
-        if m_date:
-            date_text = m_date.group(1)
-
-        # استخراج تقریبی رکوردها
-        patterns = re.findall(r"([A-Za-zآ-ی0-9\s\-\/]+)\s+([\d,]+)\s*تومان", page_text)
-        for name, price in patterns:
-            name = clean_text(name)
-            price = clean_text(price)
-            if len(name) > 3:
-                results.append({
-                    "car_name": name,
-                    "market_price": f"{price} تومان",
-                    "factory_price": "---",
-                    "source": "همراه مکانیک",
-                    "date": date_text
-                })
-    except Exception as e:
-        print("hamrah error:", e)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, "html.parser")
+            page_text = clean_text(soup.get_text(" "))
+            patterns = re.findall(r"([A-Za-zآ-ی0-9\s\-]+)\s+([\d,]+)\s*تومان", page_text)
+            for name, price in patterns:
+                if len(name) > 3:
+                    results.append({
+                        "car_name": clean_text(name),
+                        "market_price": f"{price} تومان",
+                        "factory_price": "---",
+                        "source": "همراه مکانیک",
+                        "date": "لحظه‌ای"
+                    })
+    except Exception as e: print("Hamrah Error:", e)
 
 @app.route("/")
 def home():
@@ -129,35 +62,16 @@ def home():
 def api_prices():
     query = request.args.get("query", "").strip().lower()
     results = []
-
-    threads = [
-        threading.Thread(target=scrape_iranjib_internal, args=(results,)),
-        threading.Thread(target=scrape_iranjib_imported, args=(results,)),
-        threading.Thread(target=scrape_hamrah, args=(results,))
-    ]
-
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # حذف تکراری‌ها
-    unique = []
-    seen = set()
-    for item in results:
-        key = (item["car_name"], item["market_price"], item["factory_price"], item["source"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-
+    t1 = threading.Thread(target=scrape_iranjib_internal, args=(results,))
+    t2 = threading.Thread(target=scrape_hamrah, args=(results,))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+    
     if query:
-        unique = [x for x in unique if query in x["car_name"].lower()]
-
-    return jsonify(unique)
-
-import os
+        results = [x for x in results if query in x["car_name"].lower()]
+    return jsonify(results)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-    Fix Render app startup
+    # این بخش حیاتی برای Render است
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
